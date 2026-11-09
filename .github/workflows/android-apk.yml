@@ -175,3 +175,11 @@ jobs:
           path: source-files.txt
           if-no-files-found: ignore
           retention-days: 7
+      - name: Upload extracted project source for inspection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Snake-extracted-project-source
+          path: extracted/
+          if-no-files-found: error
+          retention-days: 7
