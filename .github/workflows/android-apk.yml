@@ -82,6 +82,34 @@ jobs:
           echo "GRADLE_VERSION=$GRADLE_VERSION" >> "$GITHUB_ENV"
           echo "Using Gradle version specified by the source project: $GRADLE_VERSION"
 
+      - name: Enable BuildConfig generation required by the existing app
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+
+          project_dir = Path(os.environ["PROJECT_DIR"])
+          gradle_file = project_dir / "app" / "build.gradle.kts"
+          source = gradle_file.read_text(encoding="utf-8")
+
+          if "buildConfig = true" not in source:
+              marker = "android {"
+              if marker not in source:
+                  raise SystemExit("Could not find the Android Gradle configuration block.")
+              source = source.replace(
+                  marker,
+                  marker + "\n    buildFeatures {\n        buildConfig = true\n    }\n",
+                  1,
+              )
+              gradle_file.write_text(source, encoding="utf-8")
+
+          if "buildConfig = true" not in gradle_file.read_text(encoding="utf-8"):
+              raise SystemExit("BuildConfig generation was not enabled.")
+          print("Enabled BuildConfig generation in the extracted build copy.")
+          PY
+
       - name: Download and verify Gradle distribution
         shell: bash
         run: |
