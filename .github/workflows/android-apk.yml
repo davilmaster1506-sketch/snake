@@ -41,7 +41,7 @@ jobs:
             "build-tools;36.0.0" \
             "platform-tools"
 
-      - name: Extract and inspect the existing source archive
+      - name: Extract source and read its original build settings
         shell: bash
         run: |
           set -euo pipefail
@@ -57,8 +57,6 @@ jobs:
             \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)"
           if [ -z "$SETTINGS_FILE" ]; then
             echo "ERROR: No Gradle settings file found in the existing source archive."
-            echo "===== TOP-LEVEL SOURCE FILES ====="
-            find "$GITHUB_WORKSPACE/extracted" -maxdepth 4 -type f -printf '%P\n' | sort
             exit 2
           fi
 
@@ -66,15 +64,30 @@ jobs:
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
           echo "Found existing Gradle project: $PROJECT_DIR"
 
-          echo "===== BUILD CONFIGURATION ====="
-          find "$PROJECT_DIR" -maxdepth 3 -type f \
-            \( -name 'build.gradle' -o -name 'build.gradle.kts' -o -name 'gradle-wrapper.properties' -o -name '.env.example' \) \
-            -print | sort
+          echo "===== ORIGINAL ROOT BUILD FILE ====="
+          sed -n '1,200p' "$PROJECT_DIR/build.gradle.kts"
+          echo "===== ORIGINAL APP BUILD FILE ====="
+          sed -n '1,240p' "$PROJECT_DIR/app/build.gradle.kts"
 
-      - name: Set up Gradle
+          GRADLE_VERSION=""
+          ORIGINAL_WORKFLOW="$PROJECT_DIR/.github/workflows/build-apk.yml"
+          if [ -f "$ORIGINAL_WORKFLOW" ]; then
+            echo "===== ORIGINAL PROJECT APK WORKFLOW ====="
+            cat "$ORIGINAL_WORKFLOW"
+            GRADLE_VERSION="$(sed -nE 's/^[[:space:]]*gradle-version:[[:space:]]*["'\''"]?([^" '\''"]+).*/\1/p' "$ORIGINAL_WORKFLOW" | head -n 1)"
+          fi
+
+          if [ -z "$GRADLE_VERSION" ]; then
+            # Compatibility fallback for source archives that omit a Gradle version.
+            GRADLE_VERSION="8.9"
+          fi
+          echo "GRADLE_VERSION=$GRADLE_VERSION" >> "$GITHUB_ENV"
+          echo "Selected existing-project Gradle version: $GRADLE_VERSION"
+
+      - name: Set up the existing project's Gradle version
         uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: "9.3.1"
+          gradle-version: ${{ env.GRADLE_VERSION }}
 
       - name: Create temporary debug signing key when needed
         shell: bash
