@@ -69,25 +69,45 @@ jobs:
           echo "===== ORIGINAL APP BUILD FILE ====="
           sed -n '1,240p' "$PROJECT_DIR/app/build.gradle.kts"
 
-          GRADLE_VERSION=""
           ORIGINAL_WORKFLOW="$PROJECT_DIR/.github/workflows/build-apk.yml"
+          GRADLE_VERSION="8.9"
           if [ -f "$ORIGINAL_WORKFLOW" ]; then
             echo "===== ORIGINAL PROJECT APK WORKFLOW ====="
             cat "$ORIGINAL_WORKFLOW"
-            GRADLE_VERSION="$(sed -nE 's/^[[:space:]]*gradle-version:[[:space:]]*["'\''"]?([^" '\''"]+).*/\1/p' "$ORIGINAL_WORKFLOW" | head -n 1)"
-          fi
-
-          if [ -z "$GRADLE_VERSION" ]; then
-            # Compatibility fallback for source archives that omit a Gradle version.
-            GRADLE_VERSION="8.9"
+            DETECTED_VERSION="$(grep -m1 'gradle-version:' "$ORIGINAL_WORKFLOW" | sed -E 's/.*gradle-version:[[:space:]]*//; s/["'\'' ]//g' || true)"
+            if [ -n "$DETECTED_VERSION" ]; then
+              GRADLE_VERSION="$DETECTED_VERSION"
+            fi
           fi
           echo "GRADLE_VERSION=$GRADLE_VERSION" >> "$GITHUB_ENV"
-          echo "Selected existing-project Gradle version: $GRADLE_VERSION"
+          echo "Using Gradle version specified by the source project: $GRADLE_VERSION"
 
-      - name: Set up the existing project's Gradle version
-        uses: gradle/actions/setup-gradle@v6
-        with:
-          gradle-version: ${{ env.GRADLE_VERSION }}
+      - name: Download and verify Gradle distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GRADLE_VERSION" != "8.9" ]; then
+            echo "No pinned checksum is configured for the source project's Gradle $GRADLE_VERSION."
+            exit 3
+          fi
+
+          EXPECTED_SHA256="d725d707bfabd4dfdc958c624003b3c80accc03f7037b5122c4b1d0ef15cecab"
+          ZIP_PATH="$RUNNER_TEMP/gradle-$GRADLE_VERSION-bin.zip"
+          INSTALL_DIR="$RUNNER_TEMP/gradle"
+
+          echo "Downloading Gradle $GRADLE_VERSION from the verified distribution mirror..."
+          curl --fail --location --retry 4 --retry-all-errors \
+            --connect-timeout 30 --max-time 900 \
+            "https://repo.huaweicloud.com/gradle/gradle-$GRADLE_VERSION-bin.zip" \
+            --output "$ZIP_PATH"
+
+          echo "$EXPECTED_SHA256  $ZIP_PATH" | sha256sum --check --status
+          echo "Gradle distribution checksum verified."
+
+          mkdir -p "$INSTALL_DIR"
+          unzip -q "$ZIP_PATH" -d "$INSTALL_DIR"
+          echo "$INSTALL_DIR/gradle-$GRADLE_VERSION/bin" >> "$GITHUB_PATH"
+          "$INSTALL_DIR/gradle-$GRADLE_VERSION/bin/gradle" --version
 
       - name: Create temporary debug signing key when needed
         shell: bash
@@ -109,12 +129,7 @@ jobs:
         run: |
           set -euo pipefail
           cd "$PROJECT_DIR"
-          if [ -f gradlew ] && [ -f gradle/wrapper/gradle-wrapper.jar ]; then
-            chmod +x gradlew
-            ./gradlew --no-daemon --stacktrace assembleDebug
-          else
-            gradle --no-daemon --stacktrace assembleDebug
-          fi
+          gradle --no-daemon --stacktrace assembleDebug
 
       - name: Upload the existing app APK
         uses: actions/upload-artifact@v4
